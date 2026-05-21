@@ -41,11 +41,11 @@
         }
 
         .screen { display: none; }
-        .active { display: block; }
+        .active { display: block !important; }
         
         /* Skribbl Dual Panel Layout */
         .game-container {
-            display: grid;
+            display: none;
             grid-template-columns: 2fr 1fr;
             gap: 20px;
             width: 100%;
@@ -56,8 +56,12 @@
             box-shadow: 0 15px 30px rgba(0,0,0,0.4);
         }
 
+        .game-container.active {
+            display: grid !important;
+        }
+
         @media (max-width: 768px) {
-            .game-container { grid-template-columns: 1fr; }
+            .game-container.active { grid-template-columns: 1fr !important; }
         }
 
         /* Left Side: Game Display Panel */
@@ -274,7 +278,6 @@
     let isBotMode = false;
     let botGuessInterval = null;
     
-    // Smart dictionary pool containing words mapped directly to contextual hints
     const wordPool = [
         { word: "APPLE", hint: "A crispy round orchard fruit" },
         { word: "BANANA", hint: "A long curved yellow fruit" },
@@ -373,10 +376,6 @@
         myName = document.getElementById('username').value.trim() || "Player";
         opponentName = "RoboBot 🤖";
         
-        // Critical layout layer isolation: hide waiting card room layers instantly
-        document.getElementById('waiting-screen').classList.remove('active');
-        document.getElementById('lobby-screen').classList.remove('active');
-        
         showScreen('game-screen');
         document.getElementById('opponent-name').innerText = "Opponent: " + opponentName;
         logChat("System", `${opponentName} has booted up and joined!`, "system");
@@ -385,10 +384,6 @@
     }
 
     function setupConnection() {
-        // Clear lobby overlays if a peer joins
-        document.getElementById('waiting-screen').classList.remove('active');
-        document.getElementById('lobby-screen').classList.remove('active');
-        
         conn.on('open', () => {
             showScreen('game-screen');
             conn.send({ type: 'handshake', name: myName });
@@ -504,8 +499,6 @@
             if (gamePhase === "game-over" || !isWordMaster) return;
             
             let lettersLeft = currentWord.split('').filter(l => !guessedLetters.includes(l));
-            
-            // Bot Hint Integration: Bot is twice as likely to guess correct if you provided a custom hint!
             let customHintBonus = (currentHint && currentHint.length > 0) ? 0.85 : 0.60;
             
             if (lettersLeft.length > 0 && Math.random() < customHintBonus) {
@@ -642,7 +635,6 @@
         }
     }
 
-    UX layout fix to overlay panels
     function endGame(guesserWon, customMessage) {
         let payload = { type: 'game-over', word: currentWord, msg: customMessage };
         handleIncomingData(payload); 
