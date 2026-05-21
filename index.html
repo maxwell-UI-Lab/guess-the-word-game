@@ -368,7 +368,6 @@
         });
     }
 
-    /* BOT CONFIGURATION ENGINE */
     function startBotGame() {
         isBotMode = true;
         isWordMaster = true; 
@@ -496,7 +495,10 @@
         clearInterval(botGuessInterval);
         
         botGuessInterval = setInterval(() => {
-            if (gamePhase === "game-over" || !isWordMaster) return;
+            if (gamePhase !== "guessing" || !isWordMaster) {
+                clearInterval(botGuessInterval);
+                return;
+            }
             
             let lettersLeft = currentWord.split('').filter(l => !guessedLetters.includes(l));
             let customHintBonus = (currentHint && currentHint.length > 0) ? 0.85 : 0.60;
