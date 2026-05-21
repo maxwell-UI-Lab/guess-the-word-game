@@ -217,7 +217,8 @@
         <div style="margin: 10px 0; color: #64748b; font-weight: bold;">OR</div>
         <input type="text" id="join-room-id" placeholder="Enter Room ID">
         <button class="btn" style="width:100%; margin-bottom:12px;" onclick="joinRoom()">Join Room</button>
-        <button class="btn" style="width:100%; background:#64748b;" onclick="joinRandom()">Play Random Match</button>
+        <button class="btn" style="width:100%; background:#64748b; margin-bottom:12px;" onclick="joinRandom()">Play Random Match</button>
+        <button class="btn" style="width:100%; background:#f59e0b;" onclick="startBotGame()">🤖 Play with Bot (Solo)</button>
     </div>
 
     <div id="waiting-screen" class="screen lobby-container">
@@ -270,14 +271,37 @@
     let myName = "Player", opponentName = "Opponent";
     let isWordMaster = false; 
     let amIRoomCreator = false; 
+    let isBotMode = false;
+    let botGuessInterval = null;
     
+    // Smart dictionary pool containing words mapped directly to contextual hints
     const wordPool = [
-        "APPLE", "BANANA", "GUITAR", "MONKEY", "ROCKET", "CASTLE", "DRAGON", "ROBOT", 
-        "PIRATE", "PIZZA", "BURGER", "CAMERA", "LAPTOP", "SPIDER", "WIZARD", "ZOMBIE",
-        "DOCTOR", "SOCCER", "NINJA", "AIRPLANE", "SHARK", "DIAMOND", "SUBWAY", "COFFEE"
+        { word: "APPLE", hint: "A crispy round orchard fruit" },
+        { word: "BANANA", hint: "A long curved yellow fruit" },
+        { word: "GUITAR", hint: "A stringed musical instrument" },
+        { word: "MONKEY", hint: "A playful tree-climbing mammal" },
+        { word: "ROCKET", hint: "Vehicular device heading into deep space" },
+        { word: "CASTLE", hint: "Fortified medieval stone structure" },
+        { word: "DRAGON", hint: "Mythical fire-breathing reptile" },
+        { word: "ROBOT", hint: "Automated mechanical drone machine" },
+        { word: "PIRATE", hint: "Ocean sailing outlaw looking for treasure" },
+        { word: "PIZZA", hint: "Cheesy Italian dish sliced in triangles" },
+        { word: "BURGER", hint: "Fast food meat patty inside buns" },
+        { word: "CAMERA", hint: "Handheld device used to capture photographs" },
+        { word: "LAPTOP", hint: "Portable computing workstation device" },
+        { word: "SPIDER", hint: "Eight-legged web-spinning insect hunter" },
+        { word: "WIZARD", hint: "Magical robes-wearing spell caster" },
+        { word: "ZOMBIE", hint: "Walking undead horror monster" },
+        { word: "DOCTOR", hint: "Medical expert working inside hospitals" },
+        { word: "SOCCER", hint: "The world's most popular football sport" },
+        { word: "NINJA", hint: "Stealthy shadow warrior dressed in dark clothes" },
+        { word: "AIRPLANE", hint: "Commercial flying passenger jet wing" },
+        { word: "SHARK", hint: "Apex ocean predator with rows of sharp teeth" },
+        { word: "DIAMOND", hint: "Super valuable shiny crystal gemstone" }
     ];
+
     let currentChoices = [], currentWord = "", currentHint = "", guessedLetters = [], lives = 6;
-    let turnTimer = null, timeLeft = 30;
+    let turnTimer = null, timeLeft = 30, gamePhase = "waiting";
 
     function showScreen(screenId) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -306,12 +330,12 @@
         });
     }
 
-    function createRoom() { amIRoomCreator = true; isWordMaster = true; showScreen('waiting-screen'); initPeer(); }
+    function createRoom() { amIRoomCreator = true; isWordMaster = true; isBotMode = false; showScreen('waiting-screen'); initPeer(); }
 
     function joinRoom() {
         let roomId = document.getElementById('join-room-id').value.trim();
         if(!roomId) return alert("Please enter a Room ID");
-        amIRoomCreator = false; isWordMaster = false;
+        amIRoomCreator = false; isWordMaster = false; isBotMode = false;
         myName = document.getElementById('username').value.trim() || "Player";
         showScreen('waiting-screen');
         peer = new Peer();
@@ -326,7 +350,7 @@
         let randomRoomId = "SKRIBBL_MP_ROOM_" + bucket;
         myName = document.getElementById('username').value.trim() || "Player";
         showScreen('waiting-screen');
-        amIRoomCreator = false; isWordMaster = false;
+        amIRoomCreator = false; isWordMaster = false; isBotMode = false;
         peer = new Peer();
         peer.on('open', () => {
             let tryConn = peer.connect(randomRoomId);
@@ -341,7 +365,30 @@
         });
     }
 
+    /* BOT CONFIGURATION ENGINE */
+    function startBotGame() {
+        isBotMode = true;
+        isWordMaster = true; 
+        amIRoomCreator = true;
+        myName = document.getElementById('username').value.trim() || "Player";
+        opponentName = "RoboBot 🤖";
+        
+        // Critical layout layer isolation: hide waiting card room layers instantly
+        document.getElementById('waiting-screen').classList.remove('active');
+        document.getElementById('lobby-screen').classList.remove('active');
+        
+        showScreen('game-screen');
+        document.getElementById('opponent-name').innerText = "Opponent: " + opponentName;
+        logChat("System", `${opponentName} has booted up and joined!`, "system");
+        
+        startNewRoundSequence();
+    }
+
     function setupConnection() {
+        // Clear lobby overlays if a peer joins
+        document.getElementById('waiting-screen').classList.remove('active');
+        document.getElementById('lobby-screen').classList.remove('active');
+        
         conn.on('open', () => {
             showScreen('game-screen');
             conn.send({ type: 'handshake', name: myName });
@@ -363,12 +410,14 @@
                 break;
                 
             case 'selection-phase':
+                gamePhase = "selecting";
                 if(data.assignMaster !== undefined) {
                     isWordMaster = data.assignMaster;
                 }
                 
+                clearInterval(botGuessInterval);
                 document.getElementById('host-selection').style.display = "none";
-                document.getElementById('game-controls').style.display = "flex"; // Keep chat box open
+                document.getElementById('game-controls').style.display = "flex"; 
                 document.getElementById('hint-display').innerText = "(Selecting word...)";
                 document.getElementById('word-display').innerText = "???";
                 
@@ -376,6 +425,17 @@
                     document.getElementById('player-role').innerText = "Role: Guesser";
                     document.getElementById('game-status').innerText = `${opponentName} is choosing a word...`;
                     startTimer(15, 'select-timeout'); 
+                    
+                    if(isBotMode) {
+                        setTimeout(() => {
+                            let randomObj = wordPool[Math.floor(Math.random() * wordPool.length)];
+                            currentWord = randomObj.word.toUpperCase();
+                            currentHint = randomObj.hint;
+                            guessedLetters = [];
+                            lives = 6;
+                            handleIncomingData({ type: 'setup-word', word: currentWord, hint: currentHint, lives: lives, guessedLetters: guessedLetters });
+                        }, 2000);
+                    }
                 } else {
                     document.getElementById('player-role').innerText = "Role: Word Master";
                     generateWordChoices();
@@ -385,18 +445,20 @@
                 break;
 
             case 'setup-word':
+                gamePhase = "guessing";
                 currentWord = data.word.toUpperCase();
                 currentHint = data.hint;
                 guessedLetters = data.guessedLetters || [];
                 lives = data.lives ?? 6;
                 
-                document.getElementById('hint-display').innerText = currentHint ? `(Hint: ${currentHint})` : `(${currentWord.length} letters)`;
+                document.getElementById('hint-display').innerText = currentHint ? `Hint: ${currentHint}` : `(${currentWord.length} letters)`;
                 updateWordDisplay();
                 
                 if(!isWordMaster) {
                     document.getElementById('game-status').innerText = "Guess the word!";
                 } else {
                     document.getElementById('game-status').innerText = "They are guessing...";
+                    if(isBotMode) triggerBotGuessing();
                 }
                 startTimer(30, 'guess-timeout');
                 break;
@@ -421,7 +483,9 @@
                 break;
                 
             case 'game-over':
+                gamePhase = "game-over";
                 stopTimer();
+                clearInterval(botGuessInterval);
                 document.getElementById('word-display').innerText = data.word;
                 document.getElementById('game-status').innerText = "Round Finished";
                 document.getElementById('host-selection').style.display = "none";
@@ -433,16 +497,43 @@
         }
     }
 
+    function triggerBotGuessing() {
+        clearInterval(botGuessInterval);
+        
+        botGuessInterval = setInterval(() => {
+            if (gamePhase === "game-over" || !isWordMaster) return;
+            
+            let lettersLeft = currentWord.split('').filter(l => !guessedLetters.includes(l));
+            
+            // Bot Hint Integration: Bot is twice as likely to guess correct if you provided a custom hint!
+            let customHintBonus = (currentHint && currentHint.length > 0) ? 0.85 : 0.60;
+            
+            if (lettersLeft.length > 0 && Math.random() < customHintBonus) {
+                let botPickChar = lettersLeft[Math.floor(Math.random() * lettersLeft.length)];
+                handlePlayerInput(opponentName, botPickChar);
+            } else {
+                if(Math.random() < customHintBonus && lettersLeft.length <= 3) {
+                    handlePlayerInput(opponentName, currentWord); 
+                } else {
+                    let dummyWords = ["PANDA", "TRAIN", "BANJO", "HOUSE", "OCEAN", "CAKE", "PIZZA"];
+                    handlePlayerInput(opponentName, dummyWords[Math.floor(Math.random() * dummyWords.length)]);
+                }
+            }
+        }, 4000);
+    }
+
     function startNewRoundSequence() {
         if (amIRoomCreator) {
-            conn.send({ type: 'selection-phase', assignMaster: !isWordMaster });
+            if(!isBotMode && conn && conn.open) {
+                conn.send({ type: 'selection-phase', assignMaster: !isWordMaster });
+            }
             handleIncomingData({ type: 'selection-phase', assignMaster: isWordMaster });
         }
     }
 
     function generateWordChoices() {
         let shuffled = [...wordPool].sort(() => 0.5 - Math.random());
-        currentChoices = shuffled.slice(0, 3);
+        currentChoices = [shuffled[0].word, shuffled[1].word, shuffled[2].word];
         for(let i=0; i<3; i++) document.getElementById(`word-opt-${i}`).innerText = currentChoices[i];
         document.getElementById('host-selection').style.display = "block";
     }
@@ -460,7 +551,7 @@
 
         let payload = { type: 'setup-word', word: currentWord, hint: currentHint, lives: lives, guessedLetters: guessedLetters };
         handleIncomingData(payload);
-        conn.send(payload);
+        if(!isBotMode && conn && conn.open) conn.send(payload);
     }
 
     function startTimer(seconds, timeoutType) {
@@ -473,7 +564,10 @@
             document.getElementById('timer-count').innerText = timeLeft;
             if(timeLeft <= 0) {
                 stopTimer();
-                if(!isWordMaster && timeoutType === 'guess-timeout') conn.send({ type: 'guess-timeout' });
+                if(!isWordMaster && timeoutType === 'guess-timeout') {
+                    if(!isBotMode && conn && conn.open) conn.send({ type: 'guess-timeout' });
+                    else if(isBotMode) handleIncomingData({ type: 'guess-timeout' });
+                }
                 else if(isWordMaster && timeoutType === 'select-timeout') handleIncomingData({ type: 'select-timeout' });
             }
         }, 1000);
@@ -481,7 +575,6 @@
 
     function stopTimer() { if(turnTimer) clearInterval(turnTimer); }
 
-    // Dispatches local text input safely to the loop host manager
     function submitInput() {
         let inputField = document.getElementById('guess-input');
         let text = inputField.value.trim();
@@ -489,11 +582,9 @@
         if(!text) return;
         
         if (isWordMaster) {
-            // Word Master cannot guess, so send it directly as standard chat
             sendChatSync(myName, text, "");
         } else {
-            // Route guesser input to room processor
-            if (amIRoomCreator) {
+            if (amIRoomCreator || isBotMode) {
                 handlePlayerInput(myName, text);
             } else {
                 conn.send({ type: 'process-input', sender: myName, text: text });
@@ -501,11 +592,9 @@
         }
     }
 
-    // Process player inputs (evaluated uniformly by room logic host)
     function handlePlayerInput(sender, text) {
         let cleanText = text.toUpperCase();
         
-        // Is it an official guess attempt? (Checks lengths matching or single character search)
         if (currentWord && (cleanText === currentWord || (cleanText.length === 1 && /^[A-Z]$/.test(cleanText)))) {
             if (cleanText === currentWord) {
                 sendChatSync(sender, `Guessed the word correctly!`, "correct");
@@ -536,7 +625,6 @@
                 }
             }
         } else {
-            // Treat it as normal public room chat
             sendChatSync(sender, text, "");
         }
     }
@@ -544,20 +632,21 @@
     function sendChatSync(sender, msg, style) {
         let payload = { type: 'chat-sync', sender: sender, msg: msg, style: style };
         handleIncomingData(payload);
-        if (conn && conn.open) conn.send(payload);
+        if (!isBotMode && conn && conn.open) conn.send(payload);
     }
 
     function syncGameStateToGuesser() {
         updateWordDisplay();
-        if (conn && conn.open) {
+        if (!isBotMode && conn && conn.open) {
             conn.send({ type: 'setup-word', word: currentWord, hint: currentHint, lives: lives, guessedLetters: guessedLetters });
         }
     }
 
+    UX layout fix to overlay panels
     function endGame(guesserWon, customMessage) {
         let payload = { type: 'game-over', word: currentWord, msg: customMessage };
         handleIncomingData(payload); 
-        if (conn && conn.open) conn.send(payload);          
+        if (!isBotMode && conn && conn.open) conn.send(payload);          
     }
 
     function updateWordDisplay() {
